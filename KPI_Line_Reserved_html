@@ -1,0 +1,251 @@
+KPI_Line_Reserved_6M_460x105_HTML_5 = 
+/* ========= Kart ölçüsü ========= */
+VAR cardW = 470
+VAR cardH = 130
+VAR pad   = 8
+VAR cTxt  = "#EAF6FF"
+VAR cGrid = "rgba(255,255,255,.18)"
+VAR fAxis = 10
+
+/* ========= Çizim alanı ========= */
+VAR w     = cardW - 2*pad
+VAR h     = cardH - 2*pad
+VAR padL  = 46
+VAR padR  = 14
+VAR padT  = 40
+VAR padB  = 25
+VAR plotW = w - padL - padR
+VAR plotH = h - padT - padB
+
+/* ========= Renkler ========= */
+VAR cBorder = "rgba(255,255,255,.12)"
+VAR cTooltipBg = "rgba(0,8,20,.92)"
+VAR cTooltipTxt = "#CFFAFE"
+
+/* ========= Veri ========= */
+VAR M6 =
+ADDCOLUMNS(
+    GENERATESERIES(1,6,1),
+    "Mon", FORMAT(DATE(2000,[Value],1),"[$-en-US]MMM"),
+    "m",[Value],
+    "R",
+        VAR m = VALUE([Value])
+        RETURN
+        CALCULATE(
+            SUM('Inventory Management'[Reserved Stock]),
+            KEEPFILTERS(
+                FILTER(ALL('Inventory Management'[Order date]),
+                    MONTH('Inventory Management'[Order date]) = m)
+            )
+        ),
+    "A",
+        VAR m = VALUE([Value])
+        RETURN
+        CALCULATE(
+            SUM('Inventory Management'[Available Stock]),
+            KEEPFILTERS(
+                FILTER(ALL('Inventory Management'[Order date]),
+                    MONTH('Inventory Management'[Order date]) = m)
+            )
+        )
+)
+
+/* ========= Reserved % hesabı ========= */
+VAR T =
+    ADDCOLUMNS(
+        M6,
+        "TotalUnits", [R] + [A],
+        "pR", DIVIDE([R],[R]+[A],0)
+    )
+
+/* ========= Y ekseni ========= */
+VAR yMaxRaw = MAXX(T,[R])
+VAR yMaxRawSafe = MAX(1,yMaxRaw)
+VAR sigPow = POWER(10,MAX(0,INT(LOG10(yMaxRawSafe))-1))
+VAR yMax = CEILING(yMaxRawSafe,sigPow)
+VAR yMin = 0
+VAR rng = MAX(1,yMax - yMin)
+
+/* ========= X yerleşimi ========= */
+VAR N = 6
+VAR stepX = DIVIDE(plotW,N-1)
+VAR xLeft = padL
+VAR xRight = w - padR
+VAR yTop = padT
+VAR yBase = h - padB
+
+/* ========= Noktalar ========= */
+VAR P_R =
+ADDCOLUMNS(
+    T,
+    "x", xLeft + ([m]-1)*stepX,
+    "y", yBase - DIVIDE([R]-yMin,rng,0)*(yBase - yTop)
+)
+
+/* ========= Çizgi ========= */
+VAR M_R =
+VAR sx = MAXX(TOPN(1,P_R,[m],ASC),[x])
+VAR sy = MAXX(TOPN(1,P_R,[m],ASC),[y])
+RETURN "M " & FORMAT(sx,"0") & " " & FORMAT(sy,"0")
+VAR Seg_R =
+CONCATENATEX(
+    FILTER(P_R,[m]>=2),
+    VAR k=[m]
+    VAR k0=IF(k-2<1,1,k-2)
+    VAR k1=k-1
+    VAR k2=k
+    VAR k3=IF(k+1>N,N,k+1)
+    VAR x0=MAXX(FILTER(P_R,[m]=k0),[x])
+    VAR y0=MAXX(FILTER(P_R,[m]=k0),[y])
+    VAR x1=MAXX(FILTER(P_R,[m]=k1),[x])
+    VAR y1=MAXX(FILTER(P_R,[m]=k1),[y])
+    VAR x2=MAXX(FILTER(P_R,[m]=k2),[x])
+    VAR y2=MAXX(FILTER(P_R,[m]=k2),[y])
+    VAR x3=MAXX(FILTER(P_R,[m]=k3),[x])
+    VAR y3=MAXX(FILTER(P_R,[m]=k3),[y])
+    VAR c1x=x1+(x2-x0)/6
+    VAR c1y=y1+(y2-y0)/6
+    VAR c2x=x2-(x3-x1)/6
+    VAR c2y=y2-(y3-y1)/6
+    RETURN " C "&FORMAT(c1x,"0")&" "&FORMAT(c1y,"0")&" "&FORMAT(c2x,"0")&" "&FORMAT(c2y,"0")&" "&FORMAT(x2,"0")&" "&FORMAT(y2,"0"),
+    "",
+    [m],ASC
+)
+VAR Path_R = M_R & Seg_R
+
+/* ========= Tooltip ========= */
+VAR HoverRich =
+CONCATENATEX(
+    P_R,
+    VAR _x = [x]
+    VAR _y = [y]
+    VAR _mon = UPPER([Mon])
+    VAR _val = FORMAT([R],"#,0")
+    VAR _p   = FORMAT([pR]*100,"0.0") & "%"
+    VAR tipW = 93
+    VAR tipH = 42
+    VAR tx0 = _x - tipW / 2
+    VAR tx = MAX(2, MIN(tx0, w - tipW - 2))
+    VAR tyBottom = _y + 10
+    VAR tyTop = _y - tipH - 10
+    VAR ty =
+        IF( tyBottom + tipH <= h - 2,
+            tyBottom,
+            IF( tyTop >= 2, tyTop, 2)
+        )
+    VAR dotX = tx + 10
+    VAR dotY = ty + 11
+
+    RETURN
+    "<g class='pt'>
+        <circle cx='" & FORMAT(_x,"0") & "' cy='" & FORMAT(_y,"0") & "' r='14' fill='transparent'/>
+        <line class='vline' x1='" & FORMAT(_x,"0") & "' y1='" & FORMAT(yTop,"0") & "'
+              x2='" & FORMAT(_x,"0") & "' y2='" & FORMAT(yBase,"0") & "'
+              stroke='rgba(255,255,255,.30)' stroke-width='1' stroke-dasharray='3 3' opacity='0'/>
+        <circle class='dot' cx='" & FORMAT(_x,"0") & "' cy='" & FORMAT(_y,"0") & "'
+                r='5.5' fill='url(#gRes)' stroke='#FFFFFF' stroke-width='1.4'
+                filter='drop-shadow(0 0 6px rgba(72,103,239,.85))' opacity='0'/>
+
+        <g class='tip' opacity='0' style='pointer-events:none'>
+            <rect x='" & FORMAT(tx,"0") & "' y='" & FORMAT(ty,"0") & "' width='" & tipW & "' height='" & tipH & "'
+                  rx='8' ry='8' fill='" & cTooltipBg & "' stroke='" & cBorder & "' stroke-width='1'
+                  filter='drop-shadow(0 6px 14px rgba(0,0,0,.5))'/>
+            <circle cx='" & FORMAT(dotX,"0") & "' cy='" & FORMAT(dotY,"0") & "'
+                    r='3.2' fill='url(#gRes)' stroke='rgba(255,255,255,.7)' stroke-width='.6'/>
+            <text x='" & FORMAT(tx + 18,"0") & "' y='" & FORMAT(ty + 15,"0") & "'
+                  font-family=""Inter,'Segoe UI',Roboto,Arial,sans-serif""
+                  font-size='11' font-weight='800' fill='" & cTooltipTxt & "'>" & _mon & "</text>
+            <text x='" & FORMAT(tx + 10,"0") & "' y='" & FORMAT(ty + 31,"0") & "'
+                  font-family=""Inter,'Segoe UI',Roboto,Arial,sans-serif""
+                  font-size='12' font-weight='700' fill='#FFFFFF'>" 
+                  & _val & " (" & _p & ")</text>
+        </g>
+     </g>",
+    "",
+    [m],ASC
+)
+
+/* ========= Grid & Etiketler ========= */
+VAR cTxtLbl="rgba(234,246,255,.85)"
+VAR axisStyle="font-family:Inter,'Segoe UI',Roboto,Arial,sans-serif;font-weight:600;letter-spacing:.2px"
+VAR grid=
+CONCATENATEX(
+    {0,0.5,1},
+    VAR t=VALUE([Value])
+    VAR y=yBase - t*(yBase - yTop)
+    RETURN "<line x1='"&FORMAT(xLeft,"0")&"' y1='"&FORMAT(y,"0")&
+           "' x2='"&FORMAT(xRight,"0")&"' y2='"&FORMAT(y,"0")&
+           "' stroke='"&cGrid&"' stroke-width='1' opacity='.75'/>",
+    ""
+)
+VAR XLabels=
+CONCATENATEX(
+    T,
+    "<text x='"&FORMAT(xLeft + ([m]-1)*stepX,"0")&"' y='"&(h - padB + 10)&
+    "' style="""&axisStyle&""" font-size='"&fAxis&
+    "px' text-anchor='middle' dominant-baseline='hanging' fill='"&cTxtLbl&"'>"&
+    UPPER([Mon])&"</text>",
+    "",
+    [m],ASC
+)
+VAR YLabels=
+"<g style="""&axisStyle&""" font-size='"&fAxis&"px' fill='"&cTxtLbl&"'>"&
+"<text x='"&(padL-6)&"' y='"&(yTop+2)&"' text-anchor='end'>"&FORMAT(yMax,"#,0")&"</text>"&
+"<text x='"&(padL-6)&"' y='"&yBase&"' text-anchor='end'>0</text></g>"
+
+/* ========= ÇIKIŞ ========= */
+RETURN
+"<div style='width:"&cardW&"px;height:"&cardH&"px;position:relative;
+             box-sizing:border-box;font-family:Inter,Segoe UI,Roboto,Arial;color:"&cTxt&";'>
+  <div style='position:absolute;inset:0;padding:"&pad&"px;border-radius:10px;
+              background:transparent;border:1px solid rgba(255,255,255,.12);
+              box-shadow:0 6px 14px rgba(0,0,0,.35);'>
+    <svg width='"&w&"' height='"&h&"' viewBox='0 0 "&w&" "&h&"' xmlns='http://www.w3.org/2000/svg'>
+      <defs>
+        <!-- Ana çizgi gradyanı: Yeşilden (%60) Maviye -->
+        <linearGradient id='gRes' x1='"&xLeft&"' y1='0' x2='"&xRight&"' y2='0' gradientUnits='userSpaceOnUse'>
+          <stop offset='0%' stop-color='#10B981'/>
+          <stop offset='60%' stop-color='#10B981'/>
+          <stop offset='100%' stop-color='#30A6FF'/>
+        </linearGradient>
+
+        <!-- Yansıma gradyanı: altta şeffaflaşır -->
+        <linearGradient id='gRef' x1='0' y1='0' x2='0' y2='1'>
+          <stop offset='0%' stop-color='rgba(16,185,129,0.35)'/>
+          <stop offset='60%' stop-color='rgba(48,166,255,0.20)'/>
+          <stop offset='100%' stop-color='rgba(48,166,255,0.00)'/>
+        </linearGradient>
+
+        <style>
+          .pt .tip{opacity:0;transition:opacity .15s ease;}
+          .pt .dot{opacity:0;transition:opacity .15s ease;}
+          .pt .vline{opacity:0;transition:opacity .15s ease;}
+          .pt:hover .tip{opacity:1;}
+          .pt:hover .dot{opacity:1;}
+          .pt:hover .vline{opacity:1;}
+        </style>
+      </defs>
+
+<!-- Başlık -->
+<text x='0' y='12'
+      font-family=""Segoe UI,Inter,Roboto,Arial,sans-serif""
+      font-size='12' font-weight='700'
+      text-transform='uppercase'
+      fill='#EAF6FF'>RESERVED UNITS
+  <tspan dx='2' fill='#FFFFFF' opacity='0.65'>●</tspan>
+  <tspan dx='2' fill='#EAF6FF' text-transform='none'>Month</tspan>
+</text>"
+& grid &
+"
+<!-- Çizgi ve yansıma -->
+<path d='"&Path_R&"' fill='none' stroke='url(#gRes)' stroke-width='2.5' stroke-linecap='round' opacity='.95'/>
+<path d='"&Path_R&" L "&FORMAT(xRight,"0")&" "&FORMAT(yBase,"0")&
+        " L "&FORMAT(xLeft,"0")&" "&FORMAT(yBase,"0")&
+        " Z' fill='url(#gRef)' opacity='.6'/>
+"
+& HoverRich &
+YLabels & XLabels &
+"
+    </svg>
+  </div>
+</div>"
