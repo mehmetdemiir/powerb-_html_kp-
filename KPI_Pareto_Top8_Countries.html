@@ -1,0 +1,371 @@
+KPI_Pareto_Top8Countries_ExcessValue_515x170_HTML_10 = 
+/* --- Kart ölçüleri ve stil --- */
+VAR cardW   = 515
+VAR cardH   = 170
+VAR pad     = 10
+VAR titleMB = 10
+VAR fTitle  = 12
+VAR cTxt    = "#FFFFFF"
+VAR cBorder = "rgba(255,255,255,.12)"
+
+/* İç SVG alanı (başlık + padding sonrası) */
+VAR w = cardW - 2*pad
+VAR h = cardH - 2*pad - titleMB
+
+/* ---- Excess Value (USD) by Country ---- */
+VAR S_ByCountry =
+    SUMMARIZECOLUMNS(
+        'Inventory Management'[Country],
+        "ExcessValue",
+            SUMX(
+                'Inventory Management',
+                VAR qty   = MAX(1, 'Inventory Management'[Quantity stock])
+                VAR avail = 'Inventory Management'[Available stock]
+                VAR minSt = 'Inventory Management'[Min stock]
+                VAR unitP = DIVIDE('Inventory Management'[Total Stock Value (USD)], qty)
+                VAR excU  = MAX(0, avail - minSt)
+                RETURN excU * unitP
+            )
+    )
+
+/* ---- Top 8 (büyük→küçük) ---- */
+VAR Top8 = TOPN(8, S_ByCountry, [ExcessValue], DESC)
+VAR T0   = SELECTCOLUMNS(Top8, "Label",[Country], "v",[ExcessValue])
+VAR N    = MAX(1, COUNTROWS(T0))
+
+/* ---- Layout ---- */
+VAR padL = 34
+VAR padR = 34
+VAR padT = 14
+VAR padB = 30
+VAR plotW = w - padL - padR
+VAR plotH = h - padT - padB
+VAR yBase = padT + plotH
+
+/* Headroom */
+VAR yMaxData = MAX(1, MAXX(T0,[v]))
+VAR yMax     = yMaxData * 1.20
+
+/* ---- Sıralı tablo + kümülatif % ---- */
+VAR totalV = SUMX(T0,[v])
+VAR T_ranked =
+    ADDCOLUMNS(T0, "i", RANKX(T0,[v],,DESC,DENSE))   -- 1..N
+VAR T =
+    ADDCOLUMNS(
+        T_ranked,
+        "cum",
+            VAR k = [i]
+            RETURN DIVIDE(SUMX(FILTER(T_ranked,[i]<=k),[v]), totalV)
+    )
+
+VAR stepX = DIVIDE(plotW, N)
+VAR barW  = stepX * 0.50
+VAR xLeft = padL
+
+/* ---- Tanımlar (bar degrade + güçlü yansıma filtresi) ---- */
+VAR gradientDef = "
+<defs>
+  <clipPath id='clipCardPareto'>
+    <rect x='0' y='0' width='" & w & "' height='" & h & "' rx='12' ry='12'/>
+  </clipPath>
+
+  <linearGradient id='gradCore' x1='0' y1='0' x2='0' y2='1'>
+    <stop offset='0%' stop-color='#00BFFF'/>
+    <stop offset='100%' stop-color='#A020F0'/>
+  </linearGradient>
+
+  <!-- Yansıma filtresi: aşağı offset + blur + beyaz flood -->
+  <filter id='reflectStrong' filterUnits='userSpaceOnUse'
+          x='0' y='0' width='" & w & "' height='" & h & "'>
+    <feOffset in='SourceAlpha' dy='6' result='off'/>
+    <feGaussianBlur in='off' stdDeviation='3' result='blur'/>
+    <feFlood flood-color='#FFFFFF' flood-opacity='0.55' result='flood'/>
+    <feComposite in='flood' in2='blur' operator='in' result='glow'/>
+    <feMerge>
+      <feMergeNode in='glow'/>
+    </feMerge>
+  </filter>
+
+  <style>
+    /* Bar hover hafif parlaklık */
+    .bar{ transition: filter .15s ease; }
+    .bar:hover{ filter: brightness(1.18); }
+
+    /* Tooltip + marker mikro animasyonları */
+    .pt .tip{opacity:0;transition:opacity .15s ease;}
+    .pt .dot{opacity:0;transition:opacity .15s ease;}
+    .pt .vline{opacity:0;transition:opacity .15s ease;}
+    .pt:hover .tip{opacity:1;}
+    .pt:hover .dot{opacity:1;}
+    .pt:hover .vline{opacity:1;}
+  </style>
+</defs>"
+VAR cCore = "url(#gradCore)"
+
+/* ---- Barlar ---- */
+VAR Bars =
+    CONCATENATEX(
+        T,
+        VAR x    = xLeft + ([i]-0.5)*stepX - barW/2
+        VAR hBar = DIVIDE([v], yMax, 0) * plotH
+        VAR y    = yBase - hBar
+        RETURN
+            "<rect class='bar' x='" & FORMAT(x,"0") & "' y='" & FORMAT(y,"0") &
+            "' width='" & FORMAT(barW,"0") & "' height='" & FORMAT(hBar,"0") & 
+            "' rx='6' ry='6' fill='" & cCore & "'/>",
+        ""
+    )
+
+/* ---- Pareto çizgisi (smooth) ---- */
+VAR P_all =
+    ADDCOLUMNS(
+        T,
+        "x", xLeft + ([i]-0.5)*stepX,
+        "y", yBase - [cum]*plotH
+    )
+VAR P_curve = SELECTCOLUMNS(P_all, "i",[i], "x",[x], "y",[y])
+
+VAR P_start = ROW("i", 0, "x", xLeft, "y", yBase)
+VAR P2      = UNION(P_start, P_curve)
+VAR Nmax    = MAXX(P2,[i])
+
+VAR MoveTo = "M " & FORMAT(xLeft,"0") & " " & FORMAT(yBase,"0")
+VAR Segments =
+    CONCATENATEX(
+        FILTER(P2, [i] >= 1),
+        VAR ii = [i]
+        VAR i0 = MAX(0, ii-2)
+        VAR i1 = MAX(0, ii-1)
+        VAR i2 = ii
+        VAR i3 = MIN(Nmax, ii+1)
+        VAR x0 = MAXX(FILTER(P2, [i]=i0), [x])
+        VAR y0 = MAXX(FILTER(P2, [i]=i0), [y])
+        VAR x1 = MAXX(FILTER(P2, [i]=i1), [x])
+        VAR y1 = MAXX(FILTER(P2, [i]=i1), [y])
+        VAR x2 = MAXX(FILTER(P2, [i]=i2), [x])
+        VAR y2 = MAXX(FILTER(P2, [i]=i2), [y])
+        VAR x3 = MAXX(FILTER(P2, [i]=i3), [x])
+        VAR y3 = MAXX(FILTER(P2, [i]=i3), [y])
+        VAR c1x = x1 + (x2 - x0)/6
+        VAR c1y = y1 + (y2 - y0)/6
+        VAR c2x = x2 - (x3 - x1)/6
+        VAR c2y = y2 - (y3 - y1)/6
+        RETURN
+            " C " & FORMAT(c1x,"0") & " " & FORMAT(c1y,"0") & " " &
+            FORMAT(c2x,"0") & " " & FORMAT(c2y,"0") & " " &
+            FORMAT(x2,"0")  & " " & FORMAT(y2,"0"),
+        "",
+        [i], ASC
+    )
+
+/* Ana beyaz çizgi */
+VAR ParetoLine =
+    "<path d='" & MoveTo & Segments &
+    "' fill='none' stroke='#FFFFFF' stroke-width='2.5' stroke-linecap='round'/>"
+
+/* İlk %20 (öğe sayısına göre) için yansıma – sadece glow çıktısı */
+VAR K20 = MAX(1, CEILING(N*0.20,1))
+VAR Segments20 =
+    CONCATENATEX(
+        FILTER(P2, [i] >= 1 && [i] <= K20),
+        VAR ii = [i]
+        VAR i0 = MAX(0, ii-2)
+        VAR i1 = MAX(0, ii-1)
+        VAR i2 = ii
+        VAR i3 = MIN(Nmax, ii+1)
+        VAR x0 = MAXX(FILTER(P2, [i]=i0), [x])
+        VAR y0 = MAXX(FILTER(P2, [i]=i0), [y])
+        VAR x1 = MAXX(FILTER(P2, [i]=i1), [x])
+        VAR y1 = MAXX(FILTER(P2, [i]=i1), [y])
+        VAR x2 = MAXX(FILTER(P2, [i]=i2), [x])
+        VAR y2 = MAXX(FILTER(P2, [i]=i2), [y])
+        VAR x3 = MAXX(FILTER(P2, [i]=i3), [x])
+        VAR y3 = MAXX(FILTER(P2, [i]=i3), [y])
+        VAR c1x = x1 + (x2 - x0)/6
+        VAR c1y = y1 + (y2 - y0)/6
+        VAR c2x = x2 - (x3 - x1)/6
+        VAR c2y = y2 - (y3 - y1)/6
+        RETURN
+            " C " & FORMAT(c1x,"0") & " " & FORMAT(c1y,"0") & " " &
+            FORMAT(c2x,"0") & " " & FORMAT(c2y,"0") & " " &
+            FORMAT(x2,"0")  & " " & FORMAT(y2,"0"),
+        "",
+        [i], ASC
+    )
+
+VAR ParetoReflection20 =
+    "<path d='" & MoveTo & Segments20 &
+    "' fill='none' stroke='#FFFFFF' stroke-width='4.5' stroke-linecap='round'
+        filter='url(#reflectStrong)'/>"
+
+/* İşaretçiler (mevcut) */
+VAR Markers =
+    CONCATENATEX(
+        P_curve,
+        "<circle cx='" & FORMAT([x],"0") & "' cy='" & FORMAT([y],"0") &
+        "' r='3.5' fill='#FFFFFF' stroke='rgba(0,0,0,.25)' stroke-width='1'><title>" &
+        FORMAT( DIVIDE(yBase-[y], plotH), "0%" ) & "</title></circle>",
+        ""
+    )
+
+/* Yüzde etiketleri (opsiyonel) */
+VAR LineLabels =
+    CONCATENATEX(
+        P_curve,
+        "<text x='" & FORMAT([x],"0") & "' y='" & FORMAT([y]-6,"0") &
+        "' font-size='9' text-anchor='middle' fill='rgba(255,255,255,.80)' font-family='Inter,Segoe UI,Roboto,Arial'>" &
+        FORMAT( DIVIDE(yBase-[y], plotH), "0%" ) & "</text>",
+        ""
+    )
+
+/* ---- Sağ eksen (yüzde) ---- */
+VAR RightTicks = {0,0.5,0.8,1}
+VAR RightAxis =
+    CONCATENATEX(
+        RightTicks,
+        VAR p = VALUE([Value])
+        VAR y = yBase - p*plotH
+        RETURN "<text x='" & (w - padR + 4) & "' y='" & FORMAT(y,"0") &
+               "' font-size='10' fill='rgba(255,255,255,.85)' font-family='Inter,Segoe UI,Roboto,Arial'>" &
+               FORMAT(p,"0%") & "</text>",
+        ""
+    )
+
+/* ---- Sol eksen (USD) ---- */
+VAR LeftAxis =
+    "<g font-family='Inter,Segoe UI,Roboto,Arial' font-size='10' fill='rgba(232,234,255,.86)'>" &
+    "<text x='" & (padL-6) & "' y='" & (padT+2) & "' text-anchor='end'>" & FORMAT(yMax, "[$-en-US]$#,,.0K") & "</text>" &
+    "<text x='" & (padL-6) & "' y='" & (padT + plotH/2) & "' text-anchor='end'>" & FORMAT(yMax/2, "[$-en-US]$#,,.0K") & "</text>" &
+    "<text x='" & (padL-6) & "' y='" & yBase & "' text-anchor='end'>$0</text>" &
+    "</g>"
+
+/* ---- %80 referans ---- */
+VAR y80 = yBase - 0.80*plotH
+VAR Ref80 =
+    "<line x1='" & padL & "' y1='" & FORMAT(y80,"0") &
+    "' x2='" & (w - padR) & "' y2='" & FORMAT(y80,"0") &
+    "' stroke='rgba(255,255,255,.40)' stroke-dasharray='5 5' stroke-width='1'/>"
+
+/* ---- X ve değer etiketleri ---- */
+VAR XLabels =
+    CONCATENATEX(
+        T,
+        VAR x = xLeft + ([i]-0.5)*stepX
+        RETURN "<text x='" & FORMAT(x,"0") & "' y='" & (yBase+13) &
+               "' font-size='10' text-anchor='middle' fill='#FFFFFF' font-family='Inter,Segoe UI,Roboto,Arial' opacity='.92'>" &
+               [Label] & "</text>",
+        ""
+    )
+VAR VLabels =
+    CONCATENATEX(
+        T,
+        VAR x    = xLeft + ([i]-0.5)*stepX
+        VAR hBar = DIVIDE([v], yMax, 0) * plotH
+        VAR yRaw = yBase - hBar - 6
+        VAR yTxt = MAX(padT + 10, yRaw)
+        RETURN "<text x='" & FORMAT(x,"0") & "' y='" & FORMAT(yTxt,"0") &
+               "' font-size='10' text-anchor='middle' fill='rgba(255,255,255,.95)' font-family='Inter,Segoe UI,Roboto,Arial'>" &
+               FORMAT([v], "[$-en-US]$#,,.0K") & "</text>",
+        ""
+    )
+
+/* ---- Grid ---- */
+VAR Grid =
+    CONCATENATEX(
+        {0,0.5,1},
+        VAR t = VALUE([Value])
+        VAR y = yBase - t*plotH
+        RETURN "<line x1='" & padL & "' y1='" & FORMAT(y,"0") &
+               "' x2='" & (w - padR) & "' y2='" & FORMAT(y,"0") &
+               "' stroke='rgba(255,255,255,.18)' stroke-width='1'/>",
+        ""
+    )
+
+/* === Hover: bar bazında tooltip + marker + dikey kılavuz === */
+VAR HoverRich =
+    CONCATENATEX(
+        T,
+        VAR _i   = [i]
+        VAR _lab = [Label]
+        VAR _v   = [v]
+        VAR _cum = [cum]
+        VAR xC   = xLeft + (_i-0.5)*stepX
+        VAR xL   = xC - barW/2
+        VAR xR   = xC + barW/2
+        VAR hBar = DIVIDE(_v, yMax, 0) * plotH
+        VAR yBar = yBase - hBar
+        VAR yCum = yBase - _cum*plotH
+
+        /* Tooltip boyut/konum */
+        VAR tipW = 90
+        VAR tipH = 45
+        VAR tx0  = xC - tipW/2
+        VAR tx   = MAX(4, MIN(tx0, w - tipW - 4))
+        VAR yAnchor = MIN(yBar, yCum)   /* tercihen üstte konumlanır */
+        VAR tyTop   = yAnchor - tipH - 10
+        VAR tyBot   = yAnchor + 10
+        VAR ty   = IF(tyTop >= 4, tyTop, IF(tyBot + tipH <= h - 4, tyBot, 4))
+        VAR dotX = tx + 10
+        VAR dotY = ty + 12
+
+        RETURN
+        "<g class='pt'>
+           <!-- Geniş hover alanı -->
+           <rect x='" & FORMAT(xC - stepX*0.48,"0") & "' y='" & padT &
+                 "' width='" & FORMAT(stepX*0.96,"0") & "' height='" & FORMAT(plotH,"0") &
+                 "' fill='transparent' pointer-events='all'/>
+
+           <!-- Dikey kılavuz -->
+           <line class='vline' x1='" & FORMAT(xC,"0") & "' y1='" & padT &
+                 "' x2='" & FORMAT(xC,"0") & "' y2='" & FORMAT(yBase,"0") &
+                 "' stroke='rgba(255,255,255,.35)' stroke-width='1' stroke-dasharray='3 3' opacity='0'/>
+
+           <!-- Glow'lu marker: kümülatif nokta -->
+           <circle class='dot' cx='" & FORMAT(xC,"0") & "' cy='" & FORMAT(yCum,"0") &
+                   "' r='5.2' fill='" & cCore & "' stroke='#FFFFFF' stroke-width='1.4'
+                   style='filter:drop-shadow(0 0 6px rgba(72,103,239,.85))' opacity='0'/>
+
+           <!-- Tooltip -->
+           <g class='tip' opacity='0' style='pointer-events:none'>
+             <rect x='" & FORMAT(tx,"0") & "' y='" & FORMAT(ty,"0") &
+                   "' width='" & tipW & "' height='" & tipH &
+                   "' rx='8' ry='8' fill='rgba(0,8,20,.92)' stroke='rgba(255,255,255,.12)' stroke-width='1'
+                   style='filter:drop-shadow(0 6px 14px rgba(0,0,0,.5))'/>
+             <circle cx='" & FORMAT(dotX,"0") & "' cy='" & FORMAT(dotY,"0") &
+                     "' r='3.2' fill='" & cCore & "' stroke='rgba(255,255,255,.7)' stroke-width='.6'/>
+             <text x='" & FORMAT(tx + 18,"0") & "' y='" & FORMAT(ty + 15,"0") &
+                   "' font-family=""Inter,Segoe UI,Roboto,Arial"" font-size='11' font-weight='800' fill='#CFFAFE'>" &
+                   UPPER(_lab) & "</text>
+             <text x='" & FORMAT(tx + 10,"0") & "' y='" & FORMAT(ty + 31,"0") &
+                   "' font-family=""Inter,Segoe UI,Roboto,Arial"" font-size='12' font-weight='700' fill='#FFFFFF'>" &
+                   FORMAT(_v, "[$-en-US]$#,,.0K") & " · " & FORMAT(_cum, "0%") & "</text>
+           </g>
+         </g>",
+        "",
+        [i], ASC
+    )
+
+/* ---- HTML çıktısı ---- */
+RETURN
+"<div style='width:" & cardW & "px;height:" & cardH & "px;position:relative;
+             font-family:Segoe UI,Inter,Roboto,Arial;color:" & cTxt & ";box-sizing:border-box;'>
+  <div style='position:absolute;inset:0;border-radius:12px;padding:" & pad & "px;
+              background:transparent;border:1px solid " & cBorder & ";
+              box-shadow:0 6px 14px rgba(0,0,0,.35);'>
+
+    <div style='font-size:" & fTitle & "px;font-weight:700;margin-bottom:" & titleMB & "px'>
+      EXCESS VALUE BY COUNTRY (TOP 8)
+    </div>
+
+    <svg width='" & w & "' height='" & h & "'
+         viewBox='0 0 " & w & " " & h & "' xmlns='http://www.w3.org/2000/svg'>
+      " & gradientDef & "
+      <g clip-path='url(#clipCardPareto)'>
+        " & Grid & Bars & ParetoReflection20 & ParetoLine & Markers & LineLabels & Ref80 & RightAxis & XLabels & VLabels & "
+        " & HoverRich & "
+      </g>
+      " & LeftAxis & "
+    </svg>
+
+  </div>
+</div>"
