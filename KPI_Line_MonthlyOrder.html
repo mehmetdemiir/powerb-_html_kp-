@@ -1,0 +1,271 @@
+KPI_Line_Monthly_Order_Trend_HTML_515x170_5 = 
+VAR cardW = 515
+VAR cardH = 170
+VAR pad   = 10
+VAR cTxt      = "#FFFFFF"
+VAR cTxtRGBA  = "rgba(234,246,255,.92)"
+VAR cBorder   = "rgba(255,255,255,.12)"
+VAR fTitle    = 12
+VAR fAxis     = 10
+VAR titleMB   = 10
+
+VAR w = cardW - 2*pad
+VAR h = cardH - 2*pad - titleMB
+
+VAR padL = 30
+VAR padR = 12
+VAR padT = 8
+VAR padB = 36
+VAR plotW = w - padL - padR
+VAR plotH = h - padT - padB
+VAR fmt   = "#,0"
+
+/* Tooltip renkleri (sisteme özgü; çizgi renklerini BOZMAZ) */
+VAR cTooltipBg  = "rgba(0,8,20,.92)"
+VAR cTooltipTxt = "#CFFAFE"
+
+/* Son 12 ayın bitiş tarihi */
+VAR maxD =
+    CALCULATE ( MAX ( 'Inventory Management'[Order Date] ), ALL ( 'Inventory Management' ) )
+
+/* 12 nokta: en eski → en yeni (son 12 ay) */
+VAR Months12 =
+    ADDCOLUMNS(
+        GENERATESERIES(0,11,1),
+        "StartOfMonth", EOMONTH( EDATE( maxD, - (11 - [Value]) ), -1 ) + 1,
+        "NextMonth"   , EOMONTH( EDATE( maxD, - (11 - [Value]) ),  0 ) + 1,
+        "MonShort"    , FORMAT( EDATE( maxD, - (11 - [Value]) ), "[$-en-US]MMM" ),
+        "Idx"         , [Value] + 1
+    )
+
+/* Ay bazında sipariş miktarı */
+VAR T0 =
+    ADDCOLUMNS(
+        Months12,
+        "v",
+            CALCULATE(
+                SUM ( 'Inventory Management'[Order Quantity] ),
+                FILTER(
+                    ALL ( 'Inventory Management'[Order Date] ),
+                    'Inventory Management'[Order Date] >= [StartOfMonth] &&
+                    'Inventory Management'[Order Date] <  [NextMonth]
+                )
+            )
+    )
+VAR T = SELECTCOLUMNS( T0, "MonthNo",[Idx], "Mon",[MonShort], "v",[v] )
+
+/* Ölçek */
+VAR yMaxRaw     = MAXX(T,[v])
+VAR yMaxRawSafe = MAX(1, yMaxRaw)
+VAR sigPow      = POWER(10, MAX(0, INT(LOG10(yMaxRawSafe)) - 1))
+VAR yMax        = CEILING(yMaxRawSafe, sigPow)
+VAR yMin        = 0
+VAR rng         = MAX(1, yMax - yMin)
+
+/* Koordinatlar */
+VAR N     = 12
+VAR stepX = DIVIDE(plotW, N-1)
+VAR xLeft = padL
+VAR xRight= w - padR
+VAR yTop  = padT
+VAR yBase = h - padB
+
+VAR P =
+    ADDCOLUMNS(
+        T,
+        "i", [MonthNo],
+        "x", xLeft + ([MonthNo]-1)*stepX,
+        "y", yBase - DIVIDE([v]-yMin, rng, 0) * (yBase - yTop)
+    )
+
+/* Alan */
+VAR PointsStr =
+    CONCATENATEX(P, FORMAT([x],"0") & "," & FORMAT([y],"0"), " ", [i], ASC)
+
+/* Alan, çizgiyle AYNI gradyan (gLine) */
+VAR AreaPoly =
+    "<polygon class='trend-area' points='" & FORMAT(xLeft,"0") & "," & FORMAT(yBase,"0") & " " &
+                      PointsStr & " " &
+                      FORMAT(xLeft + (N-1)*stepX,"0") & "," & FORMAT(yBase,"0") &
+    "' fill='url(#gLine)' fill-opacity='.35' mask='url(#maskFade)'/>"
+
+VAR MStr =
+    VAR sx = MAXX( TOPN(1, P, [i], ASC ), [x] )
+    VAR sy = MAXX( TOPN(1, P, [i], ASC ), [y] )
+    RETURN "M " & FORMAT(sx,"0") & " " & FORMAT(sy,"0")
+
+VAR SegStr =
+    CONCATENATEX(
+        FILTER(P, [i] >= 2),
+        VAR i = [i]
+        VAR i0 = IF(i-2 < 1, 1, i-2)
+        VAR i1 = i-1
+        VAR i2 = i
+        VAR i3 = IF(i+1 > N, N, i+1)
+        VAR x0 = MAXX(FILTER(P, [i]=i0), [x])
+        VAR y0 = MAXX(FILTER(P, [i]=i0), [y])
+        VAR x1 = MAXX(FILTER(P, [i]=i1), [x])
+        VAR y1 = MAXX(FILTER(P, [i]=i1), [y])
+        VAR x2 = MAXX(FILTER(P, [i]=i2), [x])
+        VAR y2 = MAXX(FILTER(P, [i]=i2), [y])
+        VAR x3 = MAXX(FILTER(P, [i]=i3), [x])
+        VAR y3 = MAXX(FILTER(P, [i]=i3), [y])
+        VAR c1x = x1 + (x2 - x0) / 6
+        VAR c1y = y1 + (y2 - y0) / 6
+        VAR c2x = x2 - (x3 - x1) / 6
+        VAR c2y = y2 - (y3 - y1) / 6
+        RETURN " C " &
+               FORMAT(c1x,"0") & " " & FORMAT(c1y,"0") & " " &
+               FORMAT(c2x,"0") & " " & FORMAT(c2y,"0") & " " &
+               FORMAT(x2,"0")  & " " & FORMAT(y2,"0"),
+        "",
+        [i], ASC
+    )
+VAR PathStr = MStr & SegStr
+
+/* Grid ve eksen */
+VAR grid =
+    CONCATENATEX(
+        {0,0.25,0.5,0.75,1},
+        VAR t = VALUE([Value])
+        VAR y = yBase - t * (yBase - yTop)
+        RETURN "<line x1='" & FORMAT(xLeft,"0") & "' y1='" & FORMAT(y,"0") &
+               "' x2='" & FORMAT(xRight,"0") & "' y2='" & FORMAT(y,"0") &
+               "' stroke='rgba(255,255,255,.18)' stroke-width='1' opacity='.70'/>",
+        ""
+    )
+
+VAR axisStyle =
+    "font-family:Inter,'Segoe UI',Roboto,Arial,sans-serif;font-weight:600;letter-spacing:.2px"
+
+VAR XLabels =
+    CONCATENATEX(
+        P,
+        "<text x='" & FORMAT([x],"0") & "' y='" & (h - padB + 10) &
+        "' style=""" & axisStyle & """ font-size='" & fAxis &
+        "px' text-anchor='middle' dominant-baseline='hanging' fill='" & cTxtRGBA & "'>" &
+        UPPER([Mon]) & "</text>",
+        "",
+        [i], ASC
+    )
+
+VAR YLabels =
+    "<g style=""" & axisStyle & """ font-size='" & fAxis & "px' fill='rgba(232,234,255,.86)'>" &
+    "<text x='" & (padL-6) & "' y='" & (yTop+2) & "' text-anchor='end'>" & FORMAT(yMax,fmt) & "</text>" &
+    "<text x='" & (padL-6) & "' y='" & (yTop + plotH/2) & "' text-anchor='end'>" & FORMAT(yMax/2,fmt) & "</text>" &
+    "<text x='" & (padL-6) & "' y='" & yBase & "' text-anchor='end'>" & FORMAT(yMin,fmt) & "</text></g>"
+
+/* === Tooltip + Marker Sistemi (renkler bozulmadan) === */
+VAR HoverRich =
+    CONCATENATEX(
+        P,
+        VAR _x   = [x]
+        VAR _y   = [y]
+        VAR _mon = UPPER([Mon])
+        VAR _val = FORMAT([v], fmt)
+
+        VAR tipW = 50
+        VAR tipH = 40
+        VAR tx0  = _x - tipW/2
+        VAR tx   = MAX(2, MIN(tx0, w - tipW - 2))
+        VAR tyBottom = _y + 10
+        VAR tyTop    = _y - tipH - 10
+        VAR ty   = IF( tyBottom + tipH <= h - 2, tyBottom, IF( tyTop >= 2, tyTop, 2) )
+        VAR dotX = tx + 10
+        VAR dotY = ty + 11
+
+        RETURN
+        "<g class='pt'>
+           <circle cx='" & FORMAT(_x,"0") & "' cy='" & FORMAT(_y,"0") & "' r='14' fill='transparent'/>
+           <line class='vline' x1='" & FORMAT(_x,"0") & "' y1='" & FORMAT(yTop,"0") &
+                 "' x2='" & FORMAT(_x,"0") & "' y2='" & FORMAT(yBase,"0") &
+                 "' stroke='rgba(255,255,255,.30)' stroke-width='1' stroke-dasharray='3 3' opacity='0'/>
+           <circle class='dot' cx='" & FORMAT(_x,"0") & "' cy='" & FORMAT(_y,"0") &
+                   "' r='5.5' fill='url(#gLine)' stroke='#FFFFFF' stroke-width='1.4'
+                   filter='drop-shadow(0 0 6px rgba(72,103,239,.85))' opacity='0'/>
+
+           <g class='tip' opacity='0' style='pointer-events:none'>
+             <rect x='" & FORMAT(tx,"0") & "' y='" & FORMAT(ty,"0") & "' width='" & tipW & "' height='" & tipH &
+                   "' rx='8' ry='8' fill='" & cTooltipBg & "' stroke='" & cBorder & "' stroke-width='1'
+                   filter='drop-shadow(0 6px 14px rgba(0,0,0,.5))'/>
+             <circle cx='" & FORMAT(dotX,"0") & "' cy='" & FORMAT(dotY,"0") &
+                     "' r='3.2' fill='url(#gLine)' stroke='rgba(255,255,255,.7)' stroke-width='.6'/>
+             <text x='" & FORMAT(tx + 18,"0") & "' y='" & FORMAT(ty + 15,"0") &
+                   "' font-family=""Inter,'Segoe UI',Roboto,Arial,sans-serif""
+                      font-size='11' font-weight='800' fill='" & cTooltipTxt & "'>" & _mon & "</text>
+             <text x='" & FORMAT(tx + 10,"0") & "' y='" & FORMAT(ty + 31,"0") &
+                   "' font-family=""Inter,'Segoe UI',Roboto,Arial,sans-serif""
+                      font-size='12' font-weight='700' fill='#FFFFFF'>" & _val & "</text>
+           </g>
+         </g>",
+        "",
+        [i], ASC
+    )
+
+RETURN
+"<div style='width:" & cardW & "px;height:" & cardH & "px;position:relative;
+             font-family:Segoe UI,Inter,Roboto,Arial;color:" & cTxt & ";box-sizing:border-box;'>
+  <div style='position:absolute;inset:0;border-radius:12px;padding:" & pad & "px;
+              background:transparent;border:1px solid " & cBorder & ";
+              box-shadow:0 6px 14px rgba(0,0,0,.35);'>
+
+    <div style='font-size:" & fTitle & "px;font-weight:700;margin-bottom:" & titleMB & "px'>
+      MONTHLY ORDER TREND
+    </div>
+    <svg width='" & w & "' height='" & h & "'
+         viewBox='0 0 " & w & " " & h & "' xmlns='http://www.w3.org/2000/svg'>
+
+      <!-- 🔹 Hover Efektleri -->
+      <style>
+        .trend-line:hover { stroke-width:5; stroke-opacity:1; filter:brightness(1.4); transition:0.2s; }
+        .trend-area:hover { fill-opacity:0.55; transition:0.2s; }
+
+        /* Tooltip + marker mikro animasyonları (tek tek nokta) */
+        .pt .tip{opacity:0;transition:opacity .15s ease;}
+        .pt .dot{opacity:0;transition:opacity .15s ease;}
+        .pt .vline{opacity:0;transition:opacity .15s ease;}
+        .pt:hover .tip{opacity:1;}
+        .pt:hover .dot{opacity:1;}
+        .pt:hover .vline{opacity:1;}
+
+        /* 🔸 ÇİZGİ ÜZERİNE GELİNCE HER ŞEY GÖRÜNSÜN */
+        .line-hit:hover ~ .pts .tip{opacity:1;}
+        .line-hit:hover ~ .pts .dot{opacity:1;}
+        .line-hit:hover ~ .pts .vline{opacity:1;}
+      </style>
+
+      <defs>
+        <linearGradient id='gLine' gradientUnits='userSpaceOnUse' x1='" & xLeft & "' y1='0' x2='" & xRight & "' y2='0'>
+          <stop offset='0%'   stop-color='#00BFFF'/>
+          <stop offset='100%' stop-color='#A020F0'/>
+        </linearGradient>
+
+        <linearGradient id='fadeY' gradientUnits='userSpaceOnUse' x1='0' y1='" & yTop & "' x2='0' y2='" & yBase & "'>
+          <stop offset='0%'   stop-color='white' stop-opacity='.60'/>
+          <stop offset='70%'  stop-color='white' stop-opacity='.20'/>
+          <stop offset='100%' stop-color='white' stop-opacity='0'/>
+        </linearGradient>
+        <mask id='maskFade'>
+          <rect x='0' y='0' width='" & w & "' height='" & h & "' fill='url(#fadeY)'/>
+        </mask>
+      </defs>
+
+      " & AreaPoly & "
+      " & grid & "
+      <path class='trend-line' d='" & PathStr & "' fill='none' stroke='url(#gLine)' stroke-opacity='.42' stroke-width='6'/>
+      <path class='trend-line' d='" & PathStr & "' fill='none' stroke='url(#gLine)' stroke-width='3'/>
+
+      <!-- 🔸 Görünmez “hit” çizgisi: sadece hover hedefi (geniş darbe alanı) -->
+      <path class='line-hit' d='" & PathStr & "'
+            fill='none' stroke='transparent' stroke-width='18'
+            pointer-events='stroke'/>
+
+      <!-- 🔸 Tüm noktalar (kardeş seçici için ayrı bir grupta) -->
+      <g class='pts'>
+        " & HoverRich & "
+      </g>
+
+      " & YLabels & XLabels & "
+    </svg>
+  </div>
+</div>"
